@@ -6,9 +6,10 @@ Pokhara University, 2026
 This server exposes a single REST endpoint, POST /predict, which:
   1. Accepts a multipart image file from the Flutter app
   2. Preprocesses it (resize, normalize) to match MobileNetV2 input
-  3. Runs inference using the trained CNN model (model/maize_model.h5)
-  4. Looks up the predicted disease in the recommendation knowledge base
-  5. Returns a structured JSON response (label, confidence, severity, treatment)
+  3. Automatically scales class mapping to match the uploaded model format
+  4. Runs inference using the trained CNN model (model/final_model.keras)
+  5. Looks up the predicted disease in the recommendation knowledge base
+  6. Returns a structured JSON response (label, confidence, severity, treatment)
 """
 
 import os
@@ -25,18 +26,16 @@ from utils.recommendations import get_recommendation
 from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 
 # --------------------------------------------------------------------------
-# Configuration
+# Configuration & Global Variables
 # --------------------------------------------------------------------------
-MODEL_PATH = os.environ.get("MODEL_PATH", "model/maize_model.h5")
+MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.keras")
 IMG_SIZE = (224, 224)  # MobileNetV2 expected input size, per proposal section 3.7
 
-# Class order MUST exactly match the order used during training
-# (i.e. the order Keras assigned indices to your training folders /
-# train_generator.class_indices). Update this if your training order differs.
-CLASS_NAMES = [
-    "Healthy",
+# Roadmap of all 10 target classes outlined for the final project proposal
+ALL_PROJECT_CLASSES = [
     "Common Rust",
     "Gray Leaf Spot",
+    "Healthy",
     "Northern Leaf Blight",
     "Southern Leaf Blight",
     "Southern Rust",
@@ -46,19 +45,39 @@ CLASS_NAMES = [
     "Downy Mildew",
 ]
 
+# This list will be dynamically assigned at startup based on the actual model file output layers
+CLASS_NAMES = []
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# App setup
+# App Setup & Dynamic Model Loading
 # --------------------------------------------------------------------------
 app = Flask(__name__)
-CORS(app)  # allow cross-origin requests from the Flutter app (section 3.11)
+CORS(app)  # Allow cross-origin requests from the Flutter app (section 3.11)
 
 # Load the model ONCE at server startup, not per-request, to minimize latency
 logger.info("Loading model from %s ...", MODEL_PATH)
-model = tf.keras.models.load_model(MODEL_PATH)
-logger.info("Model loaded successfully.")
+try:
+    model = tf.keras.models.load_model(MODEL_PATH)
+    logger.info("Model loaded successfully.")
+    
+    # Check structural outputs to toggle between current iteration and future models
+    num_model_outputs = model.output_shape[-1]
+    logger.info("Detected %d output classes from model architecture.", num_model_outputs)
+    
+    if num_model_outputs == 4:
+        logger.info("Configuring for 4-class development dataset.")
+        # Re-mapped order to align with Keras internal folder indices
+        CLASS_NAMES = ["Gray Leaf Spot", "Common Rust", "Northern Leaf Blight", "Healthy"]
+    else:
+        logger.info("Configuring workspace for full 10-class dataset deployment.")
+        CLASS_NAMES = ALL_PROJECT_CLASSES
+
+except Exception as e:
+    logger.critical("Fatal initialization failure: Could not load model target at %s. Error: %s", MODEL_PATH, str(e))
+    raise e
 
 
 # --------------------------------------------------------------------------
@@ -66,11 +85,12 @@ logger.info("Model loaded successfully.")
 # --------------------------------------------------------------------------
 @app.route("/", methods=["GET"])
 def health_check():
-    """Simple health check endpoint, also useful for Render's health checks."""
+    """Simple health check endpoint, also useful for production monitoring platforms."""
     return jsonify({
         "status": "ok",
         "message": "Maize Leaf Disease Detection API is running.",
-        "num_classes": len(CLASS_NAMES),
+        "active_classes_count": len(CLASS_NAMES),
+        "active_classes": CLASS_NAMES
     }), 200
 
 
@@ -90,7 +110,7 @@ def predict():
         return jsonify({"error": "Empty filename."}), 400
 
     if not _allowed_file(file.filename):
-        return jsonify({"error": f"Unsupported file type. Allowed: {ALLOWED_EXTENSIONS}"}), 400
+        return jsonify({"error": f"Unsupported file type. Allowed extensions: {ALLOWED_EXTENSIONS}"}), 400
 
     try:
         # 2. Read and preprocess image
@@ -104,23 +124,23 @@ def predict():
         confidence = float(predictions[predicted_index])
 
         if predicted_index >= len(CLASS_NAMES):
-            logger.error("Predicted index %d out of range for CLASS_NAMES", predicted_index)
-            return jsonify({"error": "Model output does not match configured class list."}), 500
+            logger.error("Predicted index %d out of range for current CLASS_NAMES map", predicted_index)
+            return jsonify({"error": "Model output dimensions mismatch backend configuration."}), 500
 
         disease_label = CLASS_NAMES[predicted_index]
 
-        # 4. Look up recommendation (description, treatment, prevention, severity)
+        # 4. Look up recommendation metadata (description, treatment, prevention, severity)
         recommendation = get_recommendation(disease_label)
 
-        # 5. Build structured response
+        # 5. Build structured response payload
         response = {
             "disease": disease_label,
-            "confidence": round(confidence * 100, 2),  # as percentage
+            "confidence": round(confidence * 100, 2),  # Convert to percentage float
             "is_healthy": disease_label == "Healthy",
-            "severity": recommendation["severity"],          # "Green" | "Yellow" | "Red"
-            "description": recommendation["description"],
-            "treatment": recommendation["treatment"],
-            "prevention": recommendation["prevention"],
+            "severity": recommendation.get("severity", "Unknown"),
+            "description": recommendation.get("description", "No information available."),
+            "treatment": recommendation.get("treatment", "No treatment guidelines found."),
+            "prevention": recommendation.get("prevention", "No prevention metrics found."),
             "all_class_probabilities": {
                 CLASS_NAMES[i]: round(float(p) * 100, 2) for i, p in enumerate(predictions)
             },
@@ -128,9 +148,9 @@ def predict():
 
         return jsonify(response), 200
 
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Prediction failed")
-        return jsonify({"error": f"Internal error during prediction: {str(exc)}"}), 500
+    except Exception as exc:
+        logger.exception("Inference workflow hit an exception loop:")
+        return jsonify({"error": f"Internal process error during prediction execution: {str(exc)}"}), 500
 
 
 def _allowed_file(filename: str) -> bool:
@@ -138,9 +158,9 @@ def _allowed_file(filename: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Entry point
+# Entry Point
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
-    # host=0.0.0.0 required for deployment platforms like Render (section 3.11)
+    # host=0.0.0.0 binds local interface interfaces making it visible to your Flutter client
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
