@@ -1,26 +1,49 @@
 """
-Maize Leaf Disease Detection - Flask Backend
+Maize Leaf Disease Detection - Flask Backend (Optimized with TFLite)
 Major Project: Maize Leaf Disease Detection Using CNN
 Pokhara University, 2026
 
 This server exposes a single REST endpoint, POST /predict, which:
   1. Accepts a multipart image file from the Flutter app
   2. Preprocesses it (resize, normalize) to match MobileNetV2 input
-  3. Automatically scales class mapping to match the uploaded model format
-  4. Runs inference using the trained CNN model (model/final_model.keras)
-  5. Looks up the predicted disease in the recommendation knowledge base
-  6. Returns a structured JSON response (label, confidence, severity, treatment)
+  3. Runs inference using the lightweight TFLite model (model/maize_model.tflite)
+  4. Looks up the predicted disease in the recommendation knowledge base
+  5. Returns a structured JSON response (label, confidence, severity, treatment)
 """
 
 import os
 import io
 import logging
+import importlib
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 from PIL import Image
-import tensorflow as tf
+
+# 1. SETUP LOGGING FIRST SO THE IMPORT FALLBACK CAN USE IT IMMEDIATELY
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 2. RUN IMPORT FALLBACK ENGINE
+# Prefer lightweight runtime options; fall back to TensorFlow's core lite engine if completely unavailable
+tflite = None
+for module_name in ["ai_edge_litert.interpreter", "tflite_runtime.interpreter"]:
+    try:
+        tflite = importlib.import_module(module_name)
+        logger.info("Successfully loaded TFLite engine via: %s", module_name)
+        break
+    except ImportError:
+        continue
+
+if tflite is None:
+    try:
+        import tensorflow as tf
+        tflite = tf.lite
+        logger.info("Runtime standalone wheels not found; falling back to core tensorflow.lite engine.")
+    except Exception as e:
+        logger.critical("Fatal: No TFLite execution layer found (ai-edge-litert, tflite_runtime, or tensorflow). Error: %s", str(e))
+        raise
 
 from utils.recommendations import get_recommendation
 from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
@@ -28,7 +51,8 @@ from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 # --------------------------------------------------------------------------
 # Configuration & Global Variables
 # --------------------------------------------------------------------------
-MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.keras")
+# UPDATED: Explicitly pointing to your newly converted optimized file inside the model directory
+MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.tflite")
 IMG_SIZE = (224, 224)  # MobileNetV2 expected input size, per proposal section 3.7
 
 # Roadmap of all 10 target classes outlined for the final project proposal
@@ -48,24 +72,26 @@ ALL_PROJECT_CLASSES = [
 # This list will be dynamically assigned at startup based on the actual model file output layers
 CLASS_NAMES = []
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # --------------------------------------------------------------------------
-# App Setup & Dynamic Model Loading
+# App Setup & Dynamic TFLite Model Loading
 # --------------------------------------------------------------------------
 app = Flask(__name__)
 CORS(app)  # Allow cross-origin requests from the Flutter app (section 3.11)
 
-# Load the model ONCE at server startup, not per-request, to minimize latency
-logger.info("Loading model from %s ...", MODEL_PATH)
+# Load the TFLite interpreter at startup to minimize API latency
+logger.info("Loading TFLite interpreter from %s ...", MODEL_PATH)
 try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    logger.info("Model loaded successfully.")
+    # Initialize the TFLite runtime and allocate tensor memory maps
+    interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
     
-    # Check structural outputs to toggle between current iteration and future models
-    num_model_outputs = model.output_shape[-1]
-    logger.info("Detected %d output classes from model architecture.", num_model_outputs)
+    # Extract internal metadata structural layers
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    
+    # Read output shape array structure dynamically: shape index is usually [1, num_classes]
+    num_model_outputs = output_details[0]['shape'][-1]
+    logger.info("Detected %d output classes from TFLite structural architecture.", num_model_outputs)
     
     if num_model_outputs == 4:
         logger.info("Configuring for 4-class development dataset.")
@@ -76,7 +102,7 @@ try:
         CLASS_NAMES = ALL_PROJECT_CLASSES
 
 except Exception as e:
-    logger.critical("Fatal initialization failure: Could not load model target at %s. Error: %s", MODEL_PATH, str(e))
+    logger.critical("Fatal initialization failure: Could not load TFLite model at %s. Error: %s", MODEL_PATH, str(e))
     raise e
 
 
@@ -88,7 +114,7 @@ def health_check():
     """Simple health check endpoint, also useful for production monitoring platforms."""
     return jsonify({
         "status": "ok",
-        "message": "Maize Leaf Disease Detection API is running.",
+        "message": "Maize Leaf Disease Detection API (TFLite Optimized) is running.",
         "active_classes_count": len(CLASS_NAMES),
         "active_classes": CLASS_NAMES
     }), 200
@@ -118,8 +144,19 @@ def predict():
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         processed = preprocess_image(img, target_size=IMG_SIZE)  # shape (1, 224, 224, 3)
 
-        # 3. Run inference
-        predictions = model.predict(processed)[0]  # shape (num_classes,)
+        # Ensure array data type matches the model expected precision (float32)
+        input_data = np.array(processed, dtype=np.float32)
+
+        # 3. Run TFLite inference
+        # Inject the image array into the model's input tensor
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        
+        # Fire the execution runtime loop
+        interpreter.invoke()
+        
+        # Pull output results array matrix and flatten it
+        predictions = interpreter.get_tensor(output_details[0]['index'])[0] # shape (num_classes,)
+        
         predicted_index = int(np.argmax(predictions))
         confidence = float(predictions[predicted_index])
 
@@ -161,6 +198,5 @@ def _allowed_file(filename: str) -> bool:
 # Entry Point
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
-    # host=0.0.0.0 binds local interface interfaces making it visible to your Flutter client
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
