@@ -157,6 +157,10 @@ def predict():
         # Pull output results array matrix and flatten it
         predictions = interpreter.get_tensor(output_details[0]['index'])[0] # shape (num_classes,)
         
+        # --- DEBUG LIVE LOG ENGINE ---
+        logger.info("!!! RAW MODEL OUTPUT PROBABILITIES: %s", predictions.tolist())
+        # -----------------------------
+
         predicted_index = int(np.argmax(predictions))
         confidence = float(predictions[predicted_index])
 
