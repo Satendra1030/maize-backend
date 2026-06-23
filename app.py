@@ -51,7 +51,7 @@ from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 # --------------------------------------------------------------------------
 # Configuration & Global Variables
 # --------------------------------------------------------------------------
-# UPDATED: Explicitly pointing to your newly converted optimized file inside the model directory
+# Explicitly pointing to your converted optimized file inside the model directory
 MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.tflite")
 IMG_SIZE = (224, 224)  # MobileNetV2 expected input size, per proposal section 3.7
 
@@ -95,8 +95,8 @@ try:
     
     if num_model_outputs == 4:
         logger.info("Configuring for 4-class development dataset.")
-        # Re-mapped order to align with Keras internal folder indices
-        CLASS_NAMES = ["Gray Leaf Spot", "Common Rust", "Northern Leaf Blight", "Healthy"]
+        # FIXED: Re-mapped to follow strict Keras alphabetical folder indexing
+        CLASS_NAMES = ["Common Rust", "Gray Leaf Spot", "Healthy", "Northern Leaf Blight"]
     else:
         logger.info("Configuring workspace for full 10-class dataset deployment.")
         CLASS_NAMES = ALL_PROJECT_CLASSES
