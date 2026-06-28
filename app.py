@@ -96,7 +96,7 @@ try:
     if num_model_outputs == 4:
         logger.info("Configuring for 4-class development dataset.")
         # FIXED: Re-mapped to follow strict Keras alphabetical folder indexing
-        CLASS_NAMES = ["Common Rust", "Gray Leaf Spot", "Healthy", "Northern Leaf Blight"]
+        CLASS_NAMES = ["Blight", "Common Rust", "Gray_Leaf_Spot", "Healthy"]
     else:
         logger.info("Configuring workspace for full 10-class dataset deployment.")
         CLASS_NAMES = ALL_PROJECT_CLASSES
