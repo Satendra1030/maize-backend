@@ -52,7 +52,7 @@ from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 # --------------------------------------------------------------------------
 # Main disease classifier model
 MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.tflite")
-# NEW: Gatekeeper validation binary model path (Maize vs Not-Maize)
+# Gatekeeper validation binary model path (Maize vs Not-Maize)
 GATEKEEPER_PATH = os.environ.get("GATEKEEPER_PATH", "model/gatekeeper_model.tflite")
 
 IMG_SIZE = (224, 224)  # Global resolution layer size expected by both runtimes
@@ -69,6 +69,7 @@ ALL_PROJECT_CLASSES = [
     "Maize Streak Virus",
     "Brown Spot",
     "Downy Mildew",
+    "Success"
 ]
 
 # Dynamically assigned at startup based on main model file output dimensions
@@ -176,15 +177,24 @@ def predict():
     """
     # 1. Validate request structure boundary blocks
     if "image" not in request.files:
-        return jsonify({"error": "No image file provided. Use form key 'image'."}), 400
+        return jsonify({
+            "success": False,
+            "error": "No image file provided. Use form key 'image'."
+        }), 400
 
     file = request.files["image"]
 
     if file.filename == "":
-        return jsonify({"error": "Empty filename."}), 400
+        return jsonify({
+            "success": False,
+            "error": "Empty filename."
+        }), 400
 
     if not _allowed_file(file.filename):
-        return jsonify({"error": f"Unsupported file type. Allowed extensions: {ALLOWED_EXTENSIONS}"}), 400
+        return jsonify({
+            "success": False,
+            "error": f"Unsupported file type. Allowed extensions: {ALLOWED_EXTENSIONS}"
+        }), 400
 
     try:
         # 2. Read input binary stream into PIL framework
@@ -197,9 +207,10 @@ def predict():
         if not verify_is_maize(img):
             logger.warning("Rejected upload payload: Target image is classified as NON-MAIZE.")
             return jsonify({
+                "success": False,                       # Fixed to match requested response blueprint
                 "status": "error",
                 "error_type": "INVALID_LEAF_TYPE",
-                "message": "Please scan a maize leaf only. The system detected an unsupported plant type, object, or background noise."
+                "message": "Please upload a maize leaf image only."
             }), 400
 
         # ==================================================================
@@ -221,7 +232,10 @@ def predict():
 
         if predicted_index >= len(CLASS_NAMES):
             logger.error("Predicted index %d out of range for active CLASS_NAMES structural arrays", predicted_index)
-            return jsonify({"error": "Model output dimensions mismatch backend configuration layout maps."}), 500
+            return jsonify({
+                "success": False,
+                "error": "Model output dimensions mismatch backend configuration layout maps."
+            }), 500
 
         disease_label = CLASS_NAMES[predicted_index]
 
@@ -230,6 +244,7 @@ def predict():
 
         # 4. Build complete structured deployment payload
         response = {
+            "success": True,                            # Explicit success indicator flag
             "disease": disease_label,
             "confidence": round(confidence * 100, 2),
             "is_healthy": disease_label == "Healthy",
@@ -246,7 +261,10 @@ def predict():
 
     except Exception as exc:
         logger.exception("Inference workflow hit an exception loop:")
-        return jsonify({"error": f"Internal process error during prediction execution: {str(exc)}"}), 500
+        return jsonify({
+            "success": False,
+            "error": f"Internal process error during prediction execution: {str(exc)}"
+        }), 500
 
 
 def _allowed_file(filename: str) -> bool:
