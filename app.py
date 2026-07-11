@@ -1,14 +1,12 @@
 """
-Maize Leaf Disease Detection - Flask Backend (Optimized with Two-Stage TFLite Engine)
+Maize Leaf Disease Detection - Flask Backend (Optimized with Two-Stage TFLite Engine & Chat Engine)
 Major Project: Maize Leaf Disease Detection Using CNN
 Pokhara University, 2026
 
-This server exposes a single REST endpoint, POST /predict, which:
-  1. Accepts a multipart image file from the Flutter app
-  2. Runs Stage 1 Inference (Gatekeeper Model) to ensure it is a Maize Leaf
-  3. If valid, runs Stage 2 Inference (Disease Classifier TFLite Model)
-  4. Looks up the predicted disease in the recommendation knowledge base
-  5. Returns a structured JSON response (label, confidence, severity, treatment)
+This server exposes two key REST endpoints:
+  1. POST /predict -> Accepts a leaf image, runs validation + classification TFLite layers, 
+                      and returns a diagnostic recommendation package.
+  2. POST /chat    -> Processes natural language conversational questions about maize farming.
 """
 
 import os
@@ -50,14 +48,12 @@ from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 # --------------------------------------------------------------------------
 # Configuration & Global Variables
 # --------------------------------------------------------------------------
-# Main disease classifier model
 MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.tflite")
-# Gatekeeper validation binary model path (Maize vs Not-Maize)
 GATEKEEPER_PATH = os.environ.get("GATEKEEPER_PATH", "model/gatekeeper_model.tflite")
 
-IMG_SIZE = (224, 224)  # Global resolution layer size expected by both runtimes
+IMG_SIZE = (224, 224) 
 
-# Roadmap of all 10 target classes outlined for the final project proposal
+# Roadmap of target classes outlined for the final project proposal
 ALL_PROJECT_CLASSES = [
     "Common Rust",
     "Gray Leaf Spot",
@@ -68,20 +64,17 @@ ALL_PROJECT_CLASSES = [
     "Banded Leaf and Sheath Blight",
     "Maize Streak Virus",
     "Brown Spot",
-    "Downy Mildew",
-    "Success"
+    "Downy Mildew"
 ]
 
-# Dynamically assigned at startup based on main model file output dimensions
 CLASS_NAMES = []
 
 # --------------------------------------------------------------------------
 # App Setup & Dynamic TFLite Model Loading
 # --------------------------------------------------------------------------
 app = Flask(__name__)
-CORS(app)  # Allow cross-origin requests from the Flutter app (section 3.11)
+CORS(app)  
 
-# Global holders for interpreters and input/output layer maps
 interpreter = None
 input_details = None
 output_details = None
@@ -106,7 +99,6 @@ try:
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     
-    # Read output shape structure dynamically to automatically scale active array configuration
     num_model_outputs = output_details[0]['shape'][-1]
     logger.info("Detected %d output classes from classification TFLite layers.", num_model_outputs)
     
@@ -128,30 +120,23 @@ except Exception as e:
 def verify_is_maize(img) -> bool:
     """
     Passes preprocessed image array into the gatekeeper model runtime.
-    Returns True if the model classifies the input object as a Maize leaf,
-    and False if it matches background elements or non-maize species.
     """
     try:
-        # 1. Reuse global image preprocessor module scaled to 224x224
         processed = preprocess_image(img, target_size=IMG_SIZE)
         input_data = np.array(processed, dtype=np.float32)
 
-        # 2. Fire inference execution loop on the Gatekeeper engine
         gate_interpreter.set_tensor(gate_input_details[0]['index'], input_data)
         gate_interpreter.invoke()
 
-        # 3. Pull predictions: Teachable Machine structure saves labels sequentially
         # Index 0 = Maize, Index 1 = Not_Maize
         gate_predictions = gate_interpreter.get_tensor(gate_output_details[0]['index'])[0]
         
         logger.info("!!! GATEKEEPER ANALYSIS RAW PROBABILITIES -> Maize: %.4f, Not-Maize: %.4f", 
                     gate_predictions[0], gate_predictions[1])
 
-        # Return True only if Maize probability is strictly dominant over alternative classes
         return gate_predictions[0] > gate_predictions[1]
     except Exception as err:
         logger.error("Exception tripped inside Gatekeeper pipeline layer: %s", str(err))
-        # Fallback security shield to prevent system bypass on runtime processing error
         return False
 
 
@@ -160,10 +145,10 @@ def verify_is_maize(img) -> bool:
 # --------------------------------------------------------------------------
 @app.route("/", methods=["GET"])
 def health_check():
-    """Simple health check endpoint, also useful for production monitoring platforms."""
+    """Simple health check endpoint."""
     return jsonify({
         "status": "ok",
-        "message": "Maize Leaf Disease Detection API (Dual-Stage TFLite Validation Pipeline) is running.",
+        "message": "Maize Leaf Disease Detection & Chatbot API is running.",
         "active_classes_count": len(CLASS_NAMES),
         "active_classes": CLASS_NAMES
     }), 200
@@ -172,14 +157,14 @@ def health_check():
 @app.route("/predict", methods=["POST"])
 def predict():
     """
-    Accepts a multipart/form-data image upload under the key 'image',
-    validates that the sample belongs to a maize plant, and handles prediction.
+    Accepts an image, verifies plant type, and returns diagnostic predictions.
     """
-    # 1. Validate request structure boundary blocks
+    # 1. Validate request structure boundary blocks with standardized error types
     if "image" not in request.files:
         return jsonify({
             "success": False,
-            "error": "No image file provided. Use form key 'image'."
+            "error_type": "MISSING_PAYLOAD",
+            "message": "No image file provided. Please use form key 'image'."
         }), 400
 
     file = request.files["image"]
@@ -187,19 +172,24 @@ def predict():
     if file.filename == "":
         return jsonify({
             "success": False,
-            "error": "Empty filename."
+            "error_type": "EMPTY_FILENAME",
+            "message": "Empty filename detected."
         }), 400
 
     if not _allowed_file(file.filename):
         return jsonify({
             "success": False,
-            "error": f"Unsupported file type. Allowed extensions: {ALLOWED_EXTENSIONS}"
+            "error_type": "UNSUPPORTED_EXTENSION",
+            "message": f"Unsupported file type. Allowed extensions are: {ALLOWED_EXTENSIONS}"
         }), 400
 
     try:
-        # 2. Read input binary stream into PIL framework
         image_bytes = file.read()
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+        # Clear old residual tensor weights to ensure completely unique runs
+        gate_interpreter.allocate_tensors()
+        interpreter.allocate_tensors()
 
         # ==================================================================
         # STAGE 1 PIPELINE: CRITICAL GATEKEEPER VALIDATION CHECK
@@ -207,8 +197,7 @@ def predict():
         if not verify_is_maize(img):
             logger.warning("Rejected upload payload: Target image is classified as NON-MAIZE.")
             return jsonify({
-                "success": False,                       # Fixed to match requested response blueprint
-                "status": "error",
+                "success": False,
                 "error_type": "INVALID_LEAF_TYPE",
                 "message": "Please upload a maize leaf image only."
             }), 400
@@ -219,11 +208,9 @@ def predict():
         processed = preprocess_image(img, target_size=IMG_SIZE)
         input_data = np.array(processed, dtype=np.float32)
 
-        # Inject array matrices and run core diagnostic inference execution loop
         interpreter.set_tensor(input_details[0]['index'], input_data)
         interpreter.invoke()
         
-        # Pull output structural results array matrix
         predictions = interpreter.get_tensor(output_details[0]['index'])[0]
         logger.info("!!! DIAGNOSTIC MODEL OUTPUT PROBABILITIES: %s", predictions.tolist())
 
@@ -231,20 +218,18 @@ def predict():
         confidence = float(predictions[predicted_index])
 
         if predicted_index >= len(CLASS_NAMES):
-            logger.error("Predicted index %d out of range for active CLASS_NAMES structural arrays", predicted_index)
+            logger.error("Predicted index %d out of range for active CLASS_NAMES arrays", predicted_index)
             return jsonify({
                 "success": False,
-                "error": "Model output dimensions mismatch backend configuration layout maps."
+                "error_type": "DIMENSION_MISMATCH",
+                "message": "Model output dimensions mismatch backend configuration layout maps."
             }), 500
 
         disease_label = CLASS_NAMES[predicted_index]
-
-        # 3. Look up recommendation metadata metrics mapping arrays
         recommendation = get_recommendation(disease_label)
 
-        # 4. Build complete structured deployment payload
         response = {
-            "success": True,                            # Explicit success indicator flag
+            "success": True,
             "disease": disease_label,
             "confidence": round(confidence * 100, 2),
             "is_healthy": disease_label == "Healthy",
@@ -263,7 +248,52 @@ def predict():
         logger.exception("Inference workflow hit an exception loop:")
         return jsonify({
             "success": False,
-            "error": f"Internal process error during prediction execution: {str(exc)}"
+            "error_type": "INTERNAL_SERVER_ERROR",
+            "message": f"Internal process error during prediction execution: {str(exc)}"
+        }), 500
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    """
+    Accepts conversational JSON body payload text queries from the Flutter screen layout.
+    """
+    try:
+        data = request.get_json()
+        if not data or "message" not in data:
+            return jsonify({
+                "success": False, 
+                "error_type": "INVALID_JSON",
+                "message": "Missing parameters. Provide a valid 'message' string inside the JSON body raw layer."
+            }), 400
+
+        user_message = data.get("message", "").strip()
+        if user_message == "":
+            return jsonify({
+                "success": False, 
+                "error_type": "EMPTY_MESSAGE",
+                "message": "Message body cannot be empty."
+            }), 400
+
+        logger.info("Received query payload inside Chatbot endpoint: %s", user_message)
+
+        response_text = (
+            "Hello! I am your AI Maize Expert Assistant. To provide optimal, dynamic "
+            "recommendations for your crops, please obtain a free Google Gemini API key and "
+            "integrate it directly into this route block to process long conversational answers."
+        )
+
+        return jsonify({
+            "success": True,
+            "response": response_text
+        }), 200
+
+    except Exception as chat_err:
+        logger.exception("Chat routing matrix caught an unhandled exception:")
+        return jsonify({
+            "success": False,
+            "error_type": "CHAT_SERVER_ERROR",
+            "message": f"Internal Chat Server Error: {str(chat_err)}"
         }), 500
 
 
