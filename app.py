@@ -1,29 +1,37 @@
 """
-Maize Leaf Disease Detection - Flask Backend (Optimized with Two-Stage TFLite Engine & Chat Engine)
+Maize Leaf Disease Detection - Flask Backend (Two-Stage TFLite Engine & Groq Chat Engine)
 Major Project: Maize Leaf Disease Detection Using CNN
 Pokhara University, 2026
 
-This server exposes two key REST endpoints:
-  1. POST /predict -> Accepts a leaf image, runs validation + classification TFLite layers, 
+Endpoints:
+  1. POST /predict -> Accepts a leaf image, runs validation + classification TFLite layers,
                       and returns a diagnostic recommendation package.
-  2. POST /chat    -> Processes natural language conversational questions about maize farming.
+  2. POST /chat    -> Processes natural language conversational questions about maize farming via Groq.
 """
 
 import os
 import io
 import logging
 import importlib
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 from PIL import Image
+from dotenv import load_dotenv
 
-# 1. SETUP LOGGING FIRST SO THE IMPORT FALLBACK CAN USE IT IMMEDIATELY
+# Load environment variables from local .env file
+load_dotenv()
+
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 2. RUN IMPORT FALLBACK ENGINE
+# ==========================================================================
+# GROQ API CONFIGURATION
+# ==========================================================================
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# Import Fallback Engine for TFLite Runtimes
 tflite = None
 for module_name in ["ai_edge_litert.interpreter", "tflite_runtime.interpreter"]:
     try:
@@ -42,18 +50,34 @@ if tflite is None:
         logger.critical("Fatal: No TFLite execution layer found (ai-edge-litert, tflite_runtime, or tensorflow). Error: %s", str(e))
         raise
 
+# Initialize Groq Client
+groq_client = None
+if GROQ_API_KEY:
+    try:
+        groq_module = importlib.import_module("groq")
+        Groq = getattr(groq_module, "Groq", None)
+        if Groq is None:
+            raise ImportError("Groq class not found in groq package")
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        logger.info("Groq SDK initialized successfully.")
+    except ImportError:
+        logger.warning("Groq SDK not installed or Groq class missing. Please run `pip install groq`.")
+    except Exception as err:
+        logger.error("Failed to initialize Groq client: %s", str(err))
+else:
+    logger.warning("GROQ_API_KEY missing in environment variables. Chat endpoint will be unavailable.")
+
 from utils.recommendations import get_recommendation
 from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 
 # --------------------------------------------------------------------------
 # Configuration & Global Variables
 # --------------------------------------------------------------------------
-MODEL_PATH = os.environ.get("MODEL_PATH", "model/final_model.tflite")
-GATEKEEPER_PATH = os.environ.get("GATEKEEPER_PATH", "model/gatekeeper_model.tflite")
+MODEL_PATH = os.getenv("MODEL_PATH", "model/final_model.tflite")
+GATEKEEPER_PATH = os.getenv("GATEKEEPER_PATH", "model/gatekeeper_model.tflite")
 
 IMG_SIZE = (224, 224) 
 
-# Roadmap of target classes outlined for the final project proposal
 ALL_PROJECT_CLASSES = [
     "Common Rust",
     "Gray Leaf Spot",
@@ -115,11 +139,12 @@ except Exception as e:
 
 
 # --------------------------------------------------------------------------
-# Helper Function for Crop Verification
+# Helper Functions
 # --------------------------------------------------------------------------
-def verify_is_maize(img) -> bool:
+def verify_is_maize(img: Image.Image) -> bool:
     """
     Passes preprocessed image array into the gatekeeper model runtime.
+    Index 0 = Maize, Index 1 = Not_Maize
     """
     try:
         processed = preprocess_image(img, target_size=IMG_SIZE)
@@ -128,16 +153,19 @@ def verify_is_maize(img) -> bool:
         gate_interpreter.set_tensor(gate_input_details[0]['index'], input_data)
         gate_interpreter.invoke()
 
-        # Index 0 = Maize, Index 1 = Not_Maize
         gate_predictions = gate_interpreter.get_tensor(gate_output_details[0]['index'])[0]
         
-        logger.info("!!! GATEKEEPER ANALYSIS RAW PROBABILITIES -> Maize: %.4f, Not-Maize: %.4f", 
+        logger.info("GATEKEEPER ANALYSIS -> Maize: %.4f, Not-Maize: %.4f", 
                     gate_predictions[0], gate_predictions[1])
 
-        return gate_predictions[0] > gate_predictions[1]
+        return bool(gate_predictions[0] > gate_predictions[1])
     except Exception as err:
         logger.error("Exception tripped inside Gatekeeper pipeline layer: %s", str(err))
         return False
+
+
+def _allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 # --------------------------------------------------------------------------
@@ -157,9 +185,9 @@ def health_check():
 @app.route("/predict", methods=["POST"])
 def predict():
     """
-    Accepts an image, verifies plant type, and returns diagnostic predictions.
+    Accepts an image, verifies plant type via Gatekeeper model, 
+    and returns diagnostic predictions with agronomic recommendations.
     """
-    # 1. Validate request structure boundary blocks with standardized error types
     if "image" not in request.files:
         return jsonify({
             "success": False,
@@ -180,31 +208,23 @@ def predict():
         return jsonify({
             "success": False,
             "error_type": "UNSUPPORTED_EXTENSION",
-            "message": f"Unsupported file type. Allowed extensions are: {ALLOWED_EXTENSIONS}"
+            "message": f"Unsupported file type. Allowed extensions: {ALLOWED_EXTENSIONS}"
         }), 400
 
     try:
         image_bytes = file.read()
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-        # Clear old residual tensor weights to ensure completely unique runs
-        gate_interpreter.allocate_tensors()
-        interpreter.allocate_tensors()
-
-        # ==================================================================
-        # STAGE 1 PIPELINE: CRITICAL GATEKEEPER VALIDATION CHECK
-        # ==================================================================
+        # STAGE 1 PIPELINE: GATEKEEPER VALIDATION CHECK
         if not verify_is_maize(img):
-            logger.warning("Rejected upload payload: Target image is classified as NON-MAIZE.")
+            logger.warning("Rejected upload payload: Target image classified as NON-MAIZE.")
             return jsonify({
                 "success": False,
                 "error_type": "INVALID_LEAF_TYPE",
-                "message": "Please upload a maize leaf image only."
+                "message": "Invalid crop image detected. Please upload a valid maize leaf image."
             }), 400
 
-        # ==================================================================
-        # STAGE 2 PIPELINE: STANDARDIZED MAIZE DISEASE CLASSIFICATION
-        # ==================================================================
+        # STAGE 2 PIPELINE: MAIZE DISEASE CLASSIFICATION
         processed = preprocess_image(img, target_size=IMG_SIZE)
         input_data = np.array(processed, dtype=np.float32)
 
@@ -212,17 +232,17 @@ def predict():
         interpreter.invoke()
         
         predictions = interpreter.get_tensor(output_details[0]['index'])[0]
-        logger.info("!!! DIAGNOSTIC MODEL OUTPUT PROBABILITIES: %s", predictions.tolist())
+        logger.info("DIAGNOSTIC MODEL PROBABILITIES: %s", predictions.tolist())
 
         predicted_index = int(np.argmax(predictions))
         confidence = float(predictions[predicted_index])
 
         if predicted_index >= len(CLASS_NAMES):
-            logger.error("Predicted index %d out of range for active CLASS_NAMES arrays", predicted_index)
+            logger.error("Predicted index %d out of bounds for CLASS_NAMES array", predicted_index)
             return jsonify({
                 "success": False,
                 "error_type": "DIMENSION_MISMATCH",
-                "message": "Model output dimensions mismatch backend configuration layout maps."
+                "message": "Model output dimensions mismatch backend layout maps."
             }), 500
 
         disease_label = CLASS_NAMES[predicted_index]
@@ -232,7 +252,7 @@ def predict():
             "success": True,
             "disease": disease_label,
             "confidence": round(confidence * 100, 2),
-            "is_healthy": disease_label == "Healthy",
+            "is_healthy": disease_label.lower() == "healthy",
             "severity": recommendation.get("severity", "Unknown"),
             "description": recommendation.get("description", "No detailed information available."),
             "treatment": recommendation.get("treatment", "No application guidelines found."),
@@ -256,7 +276,8 @@ def predict():
 @app.route("/chat", methods=["POST"])
 def chat():
     """
-    Accepts conversational JSON body payload text queries from the Flutter screen layout.
+    Accepts conversational queries and routes them to Groq AI (Llama 3.1 8B Instant).
+    Fast, reliable, and strictly guarded for Nepalese agricultural queries.
     """
     try:
         data = request.get_json()
@@ -264,28 +285,50 @@ def chat():
             return jsonify({
                 "success": False, 
                 "error_type": "INVALID_JSON",
-                "message": "Missing parameters. Provide a valid 'message' string inside the JSON body raw layer."
+                "message": "Missing parameters. Provide a valid 'message' string."
             }), 400
 
         user_message = data.get("message", "").strip()
-        if user_message == "":
+        if not user_message:
             return jsonify({
                 "success": False, 
                 "error_type": "EMPTY_MESSAGE",
                 "message": "Message body cannot be empty."
             }), 400
 
-        logger.info("Received query payload inside Chatbot endpoint: %s", user_message)
+        if groq_client is None:
+            return jsonify({
+                "success": False,
+                "error_type": "GROQ_NOT_CONFIGURED",
+                "message": "Groq client is uninitialized. Ensure GROQ_API_KEY is set in .env file."
+            }), 500
 
-        response_text = (
-            "Hello! I am your AI Maize Expert Assistant. To provide optimal, dynamic "
-            "recommendations for your crops, please obtain a free Google Gemini API key and "
-            "integrate it directly into this route block to process long conversational answers."
+        logger.info("Forwarding query sequence to Groq Engine: %s", user_message)
+
+        system_instruction = (
+            "You are an expert agronomy AI assistant specialized strictly in Nepalese maize cultivation, "
+            "soil health, crop protection, and local pest management (e.g., Fall Armyworm, Stem Borers, Common Rust, GLS). "
+            "Your target users are farmers and engineering research students in Nepal. "
+            "Answer agriculture-related questions accurately, concisely, and practically. "
+            "If a query is completely unrelated to agriculture or plant care, politely decline and remind "
+            "the user that you are exclusively optimized to assist with maize crop cultivation."
         )
+
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_message}
+            ],
+            model="llama-3.1-8b-instant",
+            temperature=0.3,
+            max_tokens=500
+        )
+
+        bot_response = chat_completion.choices[0].message.content
 
         return jsonify({
             "success": True,
-            "response": response_text
+            "response": bot_response
         }), 200
 
     except Exception as chat_err:
@@ -297,13 +340,9 @@ def chat():
         }), 500
 
 
-def _allowed_file(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
 # --------------------------------------------------------------------------
 # Entry Point
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
