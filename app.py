@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ==========================================================================
 # CONFIDENCE THRESHOLD CONFIGURATION
 # ==========================================================================
-CONFIDENCE_THRESHOLD = 0.50  # 50% minimum threshold for valid predictions
+CONFIDENCE_THRESHOLD = 0.70 # 70% minimum threshold for valid predictions
 
 # ==========================================================================
 # GROQ API CONFIGURATION
