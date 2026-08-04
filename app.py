@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ==========================================================================
 # CONFIDENCE THRESHOLD CONFIGURATION
 # ==========================================================================
-CONFIDENCE_THRESHOLD = 0.90 # 70% minimum threshold for valid predictions
+CONFIDENCE_THRESHOLD = 0.90 # 90% minimum threshold for valid predictions
 
 # ==========================================================================
 # GROQ API CONFIGURATION
@@ -86,30 +86,30 @@ SYMPTOMS_DATABASE = {
             "Lesions merge to cause large areas of dead tissue.",
             "Lower leaf infection spreads upward during wet conditions."
         ],
-        "description": "Northern Corn Leaf Blight is a destructive fungal infection caused by Exserohilum turcicum.",
+        "description": "Northern Leaf Blight is a destructive fungal infection caused by Exserohilum turcicum.",
         "treatment": "Apply fungicides containing azoxystrobin or pyraclostrobin at early lesion onset.",
         "prevention": "Rotate crops with legumes or soybeans and plant disease-resistant maize hybrids."
     },
-    "Northern Leaf Blight": {
-        "symptoms": [
-            "Elongated grayish-green to tan leaf spots (2-15 cm long).",
-            "Dark sporangia giving lesions a dirty appearance in humid weather.",
-            "Premature drying and foliage death."
-        ],
-        "description": "Fungal foliage infection prevalent during cool, humid mid-season growing periods.",
-        "treatment": "Spray foliar fungicides like Mancozeb or propiconazole if lesion thresholds exceed 10%.",
-        "prevention": "Incorporate infected crop residues post-harvest and maintain recommended plant spacing."
-    },
-    "Southern Leaf Blight": {
-        "symptoms": [
-            "Small, rectangular tan spots with reddish-brown borders.",
-            "Pustules restricted by leaf veins.",
-            "Widespread leaf scorching under warm and moist weather."
-        ],
-        "description": "Caused by Bipolaris maydis, thriving in warm, moist, high-temperature climates.",
-        "treatment": "Use foliar sprays like Tebraconazole when disease appears early in the canopy.",
-        "prevention": "Utilize resistant seed varieties and clear field stubble post-harvest."
-    },
+    # "Northern Leaf Blight": {
+    #     "symptoms": [
+    #         "Elongated grayish-green to tan leaf spots (2-15 cm long).",
+    #         "Dark sporangia giving lesions a dirty appearance in humid weather.",
+    #         "Premature drying and foliage death."
+    #     ],
+    #     "description": "Fungal foliage infection prevalent during cool, humid mid-season growing periods.",
+    #     "treatment": "Spray foliar fungicides like Mancozeb or propiconazole if lesion thresholds exceed 10%.",
+    #     "prevention": "Incorporate infected crop residues post-harvest and maintain recommended plant spacing."
+    # },
+    # "Southern Leaf Blight": {
+    #     "symptoms": [
+    #         "Small, rectangular tan spots with reddish-brown borders.",
+    #         "Pustules restricted by leaf veins.",
+    #         "Widespread leaf scorching under warm and moist weather."
+    #     ],
+    #     "description": "Caused by Bipolaris maydis, thriving in warm, moist, high-temperature climates.",
+    #     "treatment": "Use foliar sprays like Tebraconazole when disease appears early in the canopy.",
+    #     "prevention": "Utilize resistant seed varieties and clear field stubble post-harvest."
+    # },
     "Common Rust": {
         "symptoms": [
             "Powdery cinnamon-brown pustules on both upper and lower leaf surfaces.",
@@ -120,26 +120,16 @@ SYMPTOMS_DATABASE = {
         "treatment": "Apply copper-based or triazole fungicides early when pustules appear.",
         "prevention": "Plant resistant hybrids and avoid late-season sowing."
     },
-    "Southern Rust": {
-        "symptoms": [
-            "Tiny, dense, bright orange to reddish-orange pustules predominantly on the upper leaf surface.",
-            "Pustules break through the leaf surface cleanly.",
-            "Rapid leaf wilting under hot, humid environments."
-        ],
-        "description": "Aggressive rust disease caused by Puccinia polysora, spreading fast in warm zones.",
-        "treatment": "Prompt application of systemic triazole fungicides upon early detection.",
-        "prevention": "Select southern rust-tolerant maize lines and monitor fields frequently."
-    },
-    "Gray Leaf Spot": {
-        "symptoms": [
-            "Narrow, rectangular tan-to-gray lesions parallel to leaf veins.",
-            "Lesions turn opaque and fuse, blighting whole leaves.",
-            "Extensive leaf destruction leading to lodging."
-        ],
-        "description": "Severe fungal disease caused by Cercospora zeae-maydis, common in minimum-tillage fields.",
-        "treatment": "Spray strobilurin or triazole group fungicides during early silking.",
-        "prevention": "Practice 2-year crop rotation and deep tillage of crop residue."
-    },
+    # "Southern Rust": {
+    #     "symptoms": [
+    #         "Tiny, dense, bright orange to reddish-orange pustules predominantly on the upper leaf surface.",
+    #         "Pustules break through the leaf surface cleanly.",
+    #         "Rapid leaf wilting under hot, humid environments."
+    #     ],
+    #     "description": "Aggressive rust disease caused by Puccinia polysora, spreading fast in warm zones.",
+    #     "treatment": "Prompt application of systemic triazole fungicides upon early detection.",
+    #     "prevention": "Select southern rust-tolerant maize lines and monitor fields frequently."
+    # },
     "Gray_Leaf_Spot": {
         "symptoms": [
             "Narrow, rectangular tan-to-gray lesions parallel to leaf veins.",
@@ -150,46 +140,46 @@ SYMPTOMS_DATABASE = {
         "treatment": "Spray strobilurin or triazole group fungicides during early silking.",
         "prevention": "Practice 2-year crop rotation and deep tillage of crop residue."
     },
-    "Banded Leaf and Sheath Blight": {
-        "symptoms": [
-            "Concentric tan/brown bands on leaf sheaths and leaves.",
-            "White fungal cobweb-like mycelial growth on lower stems.",
-            "Ear rots in severe stages."
-        ],
-        "description": "Soil-borne fungal disease caused by Rhizoctonia solani f. sp. sasakii.",
-        "treatment": "Foliar application of Carbendazim or Validamycin solution near lower leaf sheaths.",
-        "prevention": "Avoid waterlogging, maintain wide row distance, and remove infected bottom leaves."
-    },
-    "Maize Streak Virus": {
-        "symptoms": [
-            "Fine, translucent pale-yellow streaks running parallel to leaf veins.",
-            "Stunted plant growth and broken streak patterns across leaves.",
-            "Deformed ears or complete failure of cob development."
-        ],
-        "description": "Viral infection transmitted by leafhopper vector species (Cicadulina spp.).",
-        "treatment": "No cure for viral infection; control leafhoppers using imidacloprid sprays.",
-        "prevention": "Use virus-resistant seed cultivars and eliminate grassy weed hosts around field margins."
-    },
-    "Brown Spot": {
-        "symptoms": [
-            "Small, yellow-to-brown spots on leaf blades, sheaths, and stalks.",
-            "Purplish-brown spots merging into large dark patches.",
-            "Stalk breakage at the nodes."
-        ],
-        "description": "Physoderma brown spot caused by Physoderma maydis in warm, wet weather.",
-        "treatment": "Foliar fungicide application if infection reaches upper canopy leaves prior to tasseling.",
-        "prevention": "Improve field soil drainage and implement strict crop rotation."
-    },
-    "Downy Mildew": {
-        "symptoms": [
-            "Chlorotic yellow-green stripes along leaves.",
-            "White, downy fungal growth on lower leaf surfaces in morning dew.",
-            "Stunted growth and 'crazy top' tassel malformation."
-        ],
-        "description": "Systemic oomycete infection resulting from waterlogged conditions and high humidity.",
-        "treatment": "Apply systemic metalaxyl-based fungicide spray.",
-        "prevention": "Treat seeds with Metalaxyl-M prior to planting and ensure field drainage."
-    },
+    # "Banded Leaf and Sheath Blight": {
+    #     "symptoms": [
+    #         "Concentric tan/brown bands on leaf sheaths and leaves.",
+    #         "White fungal cobweb-like mycelial growth on lower stems.",
+    #         "Ear rots in severe stages."
+    #     ],
+    #     "description": "Soil-borne fungal disease caused by Rhizoctonia solani f. sp. sasakii.",
+    #     "treatment": "Foliar application of Carbendazim or Validamycin solution near lower leaf sheaths.",
+    #     "prevention": "Avoid waterlogging, maintain wide row distance, and remove infected bottom leaves."
+    # },
+    # "Maize Streak Virus": {
+    #     "symptoms": [
+    #         "Fine, translucent pale-yellow streaks running parallel to leaf veins.",
+    #         "Stunted plant growth and broken streak patterns across leaves.",
+    #         "Deformed ears or complete failure of cob development."
+    #     ],
+    #     "description": "Viral infection transmitted by leafhopper vector species (Cicadulina spp.).",
+    #     "treatment": "No cure for viral infection; control leafhoppers using imidacloprid sprays.",
+    #     "prevention": "Use virus-resistant seed cultivars and eliminate grassy weed hosts around field margins."
+    # },
+    # "Brown Spot": {
+    #     "symptoms": [
+    #         "Small, yellow-to-brown spots on leaf blades, sheaths, and stalks.",
+    #         "Purplish-brown spots merging into large dark patches.",
+    #         "Stalk breakage at the nodes."
+    #     ],
+    #     "description": "Physoderma brown spot caused by Physoderma maydis in warm, wet weather.",
+    #     "treatment": "Foliar fungicide application if infection reaches upper canopy leaves prior to tasseling.",
+    #     "prevention": "Improve field soil drainage and implement strict crop rotation."
+    # },
+    # "Downy Mildew": {
+    #     "symptoms": [
+    #         "Chlorotic yellow-green stripes along leaves.",
+    #         "White, downy fungal growth on lower leaf surfaces in morning dew.",
+    #         "Stunted growth and 'crazy top' tassel malformation."
+    #     ],
+    #     "description": "Systemic oomycete infection resulting from waterlogged conditions and high humidity.",
+    #     "treatment": "Apply systemic metalaxyl-based fungicide spray.",
+    #     "prevention": "Treat seeds with Metalaxyl-M prior to planting and ensure field drainage."
+    # },
     "Healthy": {
         "symptoms": [
             "Uniform green leaf color with no lesions, pustules, or chlorotic streaks.",
