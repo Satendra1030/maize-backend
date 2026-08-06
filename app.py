@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ==========================================================================
 # CONFIDENCE THRESHOLD CONFIGURATION
 # ==========================================================================
-CONFIDENCE_THRESHOLD = 0.85 # 90% minimum threshold for valid predictions
+CONFIDENCE_THRESHOLD = 0.85 # 85% minimum threshold for valid predictions
 
 # ==========================================================================
 # GROQ API CONFIGURATION
@@ -73,6 +73,7 @@ if GROQ_API_KEY:
 else:
     logger.warning("GROQ_API_KEY missing in environment variables. Chat endpoint will be unavailable.")
 
+from utils.pattern_analysis import analyze_leaf_patterns, consistency_check
 from utils.recommendations import get_recommendation
 from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
 
@@ -391,6 +392,9 @@ def predict():
             "prevention": recommendation.get("prevention", "Maintain crop rotation and health practices.")
         })
 
+        pattern_info = analyze_leaf_patterns(np.array(img))
+        consistency_flag = consistency_check(disease_label, pattern_info)
+
         response = {
             "success": True,
             "disease": disease_label,
@@ -401,6 +405,8 @@ def predict():
             "symptoms": symptom_details.get("symptoms", []),
             "treatment": symptom_details.get("treatment", recommendation.get("treatment")),
             "prevention": symptom_details.get("prevention", recommendation.get("prevention")),
+            "pattern_analysis": pattern_info,
+            "consistency_flag": consistency_flag,
             "all_class_probabilities": {
                 CLASS_NAMES[i]: round(float(p) * 100, 2) for i, p in enumerate(predictions)
             },
