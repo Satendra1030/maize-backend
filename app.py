@@ -48,12 +48,33 @@ for module_name in ["ai_edge_litert.interpreter", "tflite_runtime.interpreter"]:
         continue
 
 if tflite is None:
+    # TensorFlow 2.x is currently incompatible with NumPy 2.x in many builds.
+    # Catch this early and provide a clear environment fix message.
+    if tuple(map(int, np.__version__.split(".")[:2])) >= (2, 0):
+        logger.critical(
+            "Detected NumPy %s, which is incompatible with TensorFlow in this environment. "
+            "Please install a compatible NumPy release: `pip install 'numpy<2'` "
+            "and then reinstall dependencies from requirements.txt.",
+            np.__version__
+        )
+        raise RuntimeError(
+            f"Incompatible NumPy version {np.__version__}; require numpy<2 for TensorFlow/TFLite runtime."
+        )
     try:
         import tensorflow as tf
         tflite = tf.lite
         logger.info("Runtime standalone wheels not found; falling back to core tensorflow.lite engine.")
+    except ImportError as e:
+        logger.critical("Fatal: No TFLite execution layer found (ai-edge-litert, tflite_runtime, or tensorflow). ImportError: %s", str(e))
+        raise
     except Exception as e:
         logger.critical("Fatal: No TFLite execution layer found (ai-edge-litert, tflite_runtime, or tensorflow). Error: %s", str(e))
+        if "numpy" in str(e).lower() or "array_api" in str(e).lower():
+            logger.critical(
+                "TensorFlow import failed due to an incompatible NumPy build. "
+                "Please downgrade NumPy to a 1.x release: `pip install 'numpy<2'` "
+                "or recreate the virtual environment using the pinned requirements file."
+            )
         raise
 
 # Initialize Groq Client
@@ -201,17 +222,11 @@ GATEKEEPER_PATH = os.getenv("GATEKEEPER_PATH", "model/gatekeeper_model.tflite")
 IMG_SIZE = (224, 224) 
 
 ALL_PROJECT_CLASSES = [
+    "Blight",
     "Common Rust",
     "Gray Leaf Spot",
-    "Healthy",
-    "Northern Leaf Blight",
-    "Southern Leaf Blight",
-    "Southern Rust",
-    "Banded Leaf and Sheath Blight",
-    "Maize Streak Virus",
-    "Brown Spot",
-    "Downy Mildew"
-]
+    "Healthy"
+    ]
 
 CLASS_NAMES = []
 
