@@ -14,6 +14,7 @@ import os
 import io
 import logging
 import importlib
+from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np

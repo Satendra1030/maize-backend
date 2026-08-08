@@ -5,10 +5,16 @@ from utils.preprocessing import preprocess_image
 
 # 1. Path configurations
 MODEL_PATH = "model/final_model.tflite"
-IMAGE_PATH = "G:\maize-backend\test_leaf.jpg"  # <-- Change this to your test leaf image path!
 
-# Correct Keras alphabetical sorting mapping
-CLASS_NAMES = ["Common Rust", "Gray Leaf Spot", "Healthy", "Northern Leaf Blight"]
+# NOTE: the original path here was "G:\maize-backend\test_leaf.jpg" --
+# in a normal (non-raw) Python string, \t is a TAB escape character,
+# not a literal backslash-t. That silently corrupted the path. Using a
+# plain relative filename avoids the whole class of bug; if you need an
+# absolute Windows path, use a raw string instead: r"G:\maize-backend\test_leaf.jpg"
+IMAGE_PATH = "test_leaf.jpg"  # <-- Change this to your test leaf image path!
+
+# Confirmed correct order -- matches app.py's CLASS_NAMES exactly.
+CLASS_NAMES = ["Blight", "Common Rust", "Gray_Leaf_Spot", "Healthy"]
 
 def test_prediction():
     print(f"Loading local TFLite model from: {MODEL_PATH}")
