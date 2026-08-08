@@ -5,7 +5,7 @@ Pokhara University, 2026
 
 Endpoints:
   1. POST /predict -> Accepts a leaf image, runs validation + classification TFLite layers,
-                      applies a 50% confidence threshold, and returns symptoms, treatments,
+                      applies a confidence threshold, and returns symptoms, treatments,
                       and diagnostic recommendation packages.
   2. POST /chat    -> Processes natural language conversational questions about maize farming via Groq.
 """
@@ -30,51 +30,31 @@ logger = logging.getLogger(__name__)
 # ==========================================================================
 # CONFIDENCE THRESHOLD CONFIGURATION
 # ==========================================================================
-CONFIDENCE_THRESHOLD = 0.85 # 85% minimum threshold for valid predictions
+CONFIDENCE_THRESHOLD = 0.85  # 85% minimum threshold for valid predictions
 
 # ==========================================================================
 # GROQ API CONFIGURATION
 # ==========================================================================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Import Fallback Engine for TFLite Runtimes
+# Import Lightweight TFLite Engine (Prioritize lightweight runtime to stay under 512MB RAM)
 tflite = None
-for module_name in ["ai_edge_litert.interpreter", "tflite_runtime.interpreter"]:
+for module_name in ["tflite_runtime.interpreter", "ai_edge_litert.interpreter"]:
     try:
         tflite = importlib.import_module(module_name)
-        logger.info("Successfully loaded TFLite engine via: %s", module_name)
+        logger.info("Successfully loaded lightweight TFLite engine via: %s", module_name)
         break
     except ImportError:
         continue
 
 if tflite is None:
-    # TensorFlow 2.x is currently incompatible with NumPy 2.x in many builds.
-    # Catch this early and provide a clear environment fix message.
-    if tuple(map(int, np.__version__.split(".")[:2])) >= (2, 0):
-        logger.critical(
-            "Detected NumPy %s, which is incompatible with TensorFlow in this environment. "
-            "Please install a compatible NumPy release: `pip install 'numpy<2'` "
-            "and then reinstall dependencies from requirements.txt.",
-            np.__version__
-        )
-        raise RuntimeError(
-            f"Incompatible NumPy version {np.__version__}; require numpy<2 for TensorFlow/TFLite runtime."
-        )
+    # Fallback to core tensorflow.lite if standalone runtime wheels aren't found
     try:
         import tensorflow as tf
         tflite = tf.lite
-        logger.info("Runtime standalone wheels not found; falling back to core tensorflow.lite engine.")
+        logger.info("Standalone TFLite wheels not found; falling back to tensorflow.lite engine.")
     except ImportError as e:
-        logger.critical("Fatal: No TFLite execution layer found (ai-edge-litert, tflite_runtime, or tensorflow). ImportError: %s", str(e))
-        raise
-    except Exception as e:
-        logger.critical("Fatal: No TFLite execution layer found (ai-edge-litert, tflite_runtime, or tensorflow). Error: %s", str(e))
-        if "numpy" in str(e).lower() or "array_api" in str(e).lower():
-            logger.critical(
-                "TensorFlow import failed due to an incompatible NumPy build. "
-                "Please downgrade NumPy to a 1.x release: `pip install 'numpy<2'` "
-                "or recreate the virtual environment using the pinned requirements file."
-            )
+        logger.critical("Fatal: No TFLite execution layer found. ImportError: %s", str(e))
         raise
 
 # Initialize Groq Client
@@ -88,7 +68,7 @@ if GROQ_API_KEY:
         groq_client = Groq(api_key=GROQ_API_KEY)
         logger.info("Groq SDK initialized successfully.")
     except ImportError:
-        logger.warning("Groq SDK not installed or Groq class missing. Please run `pip install groq`.")
+        logger.warning("Groq SDK not installed or Groq class missing. Run `pip install groq`.")
     except Exception as err:
         logger.error("Failed to initialize Groq client: %s", str(err))
 else:
@@ -112,26 +92,6 @@ SYMPTOMS_DATABASE = {
         "treatment": "Apply fungicides containing azoxystrobin or pyraclostrobin at early lesion onset.",
         "prevention": "Rotate crops with legumes or soybeans and plant disease-resistant maize hybrids."
     },
-    # "Northern Leaf Blight": {
-    #     "symptoms": [
-    #         "Elongated grayish-green to tan leaf spots (2-15 cm long).",
-    #         "Dark sporangia giving lesions a dirty appearance in humid weather.",
-    #         "Premature drying and foliage death."
-    #     ],
-    #     "description": "Fungal foliage infection prevalent during cool, humid mid-season growing periods.",
-    #     "treatment": "Spray foliar fungicides like Mancozeb or propiconazole if lesion thresholds exceed 10%.",
-    #     "prevention": "Incorporate infected crop residues post-harvest and maintain recommended plant spacing."
-    # },
-    # "Southern Leaf Blight": {
-    #     "symptoms": [
-    #         "Small, rectangular tan spots with reddish-brown borders.",
-    #         "Pustules restricted by leaf veins.",
-    #         "Widespread leaf scorching under warm and moist weather."
-    #     ],
-    #     "description": "Caused by Bipolaris maydis, thriving in warm, moist, high-temperature climates.",
-    #     "treatment": "Use foliar sprays like Tebraconazole when disease appears early in the canopy.",
-    #     "prevention": "Utilize resistant seed varieties and clear field stubble post-harvest."
-    # },
     "Common Rust": {
         "symptoms": [
             "Powdery cinnamon-brown pustules on both upper and lower leaf surfaces.",
@@ -142,16 +102,6 @@ SYMPTOMS_DATABASE = {
         "treatment": "Apply copper-based or triazole fungicides early when pustules appear.",
         "prevention": "Plant resistant hybrids and avoid late-season sowing."
     },
-    # "Southern Rust": {
-    #     "symptoms": [
-    #         "Tiny, dense, bright orange to reddish-orange pustules predominantly on the upper leaf surface.",
-    #         "Pustules break through the leaf surface cleanly.",
-    #         "Rapid leaf wilting under hot, humid environments."
-    #     ],
-    #     "description": "Aggressive rust disease caused by Puccinia polysora, spreading fast in warm zones.",
-    #     "treatment": "Prompt application of systemic triazole fungicides upon early detection.",
-    #     "prevention": "Select southern rust-tolerant maize lines and monitor fields frequently."
-    # },
     "Gray_Leaf_Spot": {
         "symptoms": [
             "Narrow, rectangular tan-to-gray lesions parallel to leaf veins.",
@@ -162,46 +112,6 @@ SYMPTOMS_DATABASE = {
         "treatment": "Spray strobilurin or triazole group fungicides during early silking.",
         "prevention": "Practice 2-year crop rotation and deep tillage of crop residue."
     },
-    # "Banded Leaf and Sheath Blight": {
-    #     "symptoms": [
-    #         "Concentric tan/brown bands on leaf sheaths and leaves.",
-    #         "White fungal cobweb-like mycelial growth on lower stems.",
-    #         "Ear rots in severe stages."
-    #     ],
-    #     "description": "Soil-borne fungal disease caused by Rhizoctonia solani f. sp. sasakii.",
-    #     "treatment": "Foliar application of Carbendazim or Validamycin solution near lower leaf sheaths.",
-    #     "prevention": "Avoid waterlogging, maintain wide row distance, and remove infected bottom leaves."
-    # },
-    # "Maize Streak Virus": {
-    #     "symptoms": [
-    #         "Fine, translucent pale-yellow streaks running parallel to leaf veins.",
-    #         "Stunted plant growth and broken streak patterns across leaves.",
-    #         "Deformed ears or complete failure of cob development."
-    #     ],
-    #     "description": "Viral infection transmitted by leafhopper vector species (Cicadulina spp.).",
-    #     "treatment": "No cure for viral infection; control leafhoppers using imidacloprid sprays.",
-    #     "prevention": "Use virus-resistant seed cultivars and eliminate grassy weed hosts around field margins."
-    # },
-    # "Brown Spot": {
-    #     "symptoms": [
-    #         "Small, yellow-to-brown spots on leaf blades, sheaths, and stalks.",
-    #         "Purplish-brown spots merging into large dark patches.",
-    #         "Stalk breakage at the nodes."
-    #     ],
-    #     "description": "Physoderma brown spot caused by Physoderma maydis in warm, wet weather.",
-    #     "treatment": "Foliar fungicide application if infection reaches upper canopy leaves prior to tasseling.",
-    #     "prevention": "Improve field soil drainage and implement strict crop rotation."
-    # },
-    # "Downy Mildew": {
-    #     "symptoms": [
-    #         "Chlorotic yellow-green stripes along leaves.",
-    #         "White, downy fungal growth on lower leaf surfaces in morning dew.",
-    #         "Stunted growth and 'crazy top' tassel malformation."
-    #     ],
-    #     "description": "Systemic oomycete infection resulting from waterlogged conditions and high humidity.",
-    #     "treatment": "Apply systemic metalaxyl-based fungicide spray.",
-    #     "prevention": "Treat seeds with Metalaxyl-M prior to planting and ensure field drainage."
-    # },
     "Healthy": {
         "symptoms": [
             "Uniform green leaf color with no lesions, pustules, or chlorotic streaks.",
@@ -226,7 +136,7 @@ ALL_PROJECT_CLASSES = [
     "Common Rust",
     "Gray Leaf Spot",
     "Healthy"
-    ]
+]
 
 CLASS_NAMES = []
 
@@ -267,7 +177,7 @@ try:
         logger.info("Configuring layout map for 4-class development dataset.")
         CLASS_NAMES = ["Blight", "Common Rust", "Gray_Leaf_Spot", "Healthy"]
     else:
-        logger.info("Configuring workspace for full 10-class dataset deployment.")
+        logger.info("Configuring workspace for full dataset deployment.")
         CLASS_NAMES = ALL_PROJECT_CLASSES
 
 except Exception as e:
@@ -279,10 +189,7 @@ except Exception as e:
 # Helper Functions
 # --------------------------------------------------------------------------
 def verify_is_maize(img: Image.Image) -> bool:
-    """
-    Passes preprocessed image array into the gatekeeper model runtime.
-    Index 0 = Maize, Index 1 = Not_Maize
-    """
+    """Passes preprocessed image array into the gatekeeper model runtime."""
     try:
         processed = preprocess_image(img, target_size=IMG_SIZE)
         input_data = np.array(processed, dtype=np.float32)
@@ -297,7 +204,7 @@ def verify_is_maize(img: Image.Image) -> bool:
 
         return bool(gate_predictions[0] > gate_predictions[1])
     except Exception as err:
-        logger.error("Exception tripped inside Gatekeeper pipeline layer: %s", str(err))
+        logger.error("Exception inside Gatekeeper pipeline layer: %s", str(err))
         return False
 
 
@@ -322,11 +229,7 @@ def health_check():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    """
-    Accepts an image, verifies plant type via Gatekeeper model, 
-    applies 50% confidence threshold, and returns diagnostic predictions 
-    with symptoms, treatment, and recommendations.
-    """
+    """Accepts an image, verifies plant type, and returns diagnostic predictions."""
     if "image" not in request.files:
         return jsonify({
             "success": False,
@@ -376,7 +279,7 @@ def predict():
         predicted_index = int(np.argmax(predictions))
         confidence = float(predictions[predicted_index])
 
-        # STAGE 3 PIPELINE: CONFIDENCE THRESHOLD CHECK (50%)
+        # STAGE 3 PIPELINE: CONFIDENCE THRESHOLD CHECK
         if confidence < CONFIDENCE_THRESHOLD:
             logger.warning("Low confidence prediction rejected: %.2f%% < %.2f%%", 
                            confidence * 100, CONFIDENCE_THRESHOLD * 100)
@@ -398,7 +301,7 @@ def predict():
 
         disease_label = CLASS_NAMES[predicted_index]
         
-        # Fallback to utils recommendation or local symptom database
+        # Recommendation lookup
         recommendation = get_recommendation(disease_label)
         symptom_details = SYMPTOMS_DATABASE.get(disease_label, {
             "symptoms": ["No specific symptoms recorded for this class."],
@@ -440,10 +343,7 @@ def predict():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """
-    Accepts conversational queries and routes them to Groq AI (Llama 3.1 8B Instant).
-    Fast, reliable, and strictly guarded for Nepalese agricultural queries.
-    """
+    """Accepts conversational queries and routes them to Groq AI (Llama 3.1 8B Instant)."""
     try:
         data = request.get_json()
         if not data or "message" not in data:
@@ -465,7 +365,7 @@ def chat():
             return jsonify({
                 "success": False,
                 "error_type": "GROQ_NOT_CONFIGURED",
-                "message": "Groq client is uninitialized. Ensure GROQ_API_KEY is set in .env file."
+                "message": "Groq client is uninitialized. Ensure GROQ_API_KEY is set in environment variables."
             }), 500
 
         logger.info("Forwarding query sequence to Groq Engine: %s", user_message)
@@ -506,7 +406,7 @@ def chat():
 
 
 # --------------------------------------------------------------------------
-# Entry Point
+# Entry Point for Local Testing
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
