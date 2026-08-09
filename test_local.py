@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 import tensorflow as tf  # Using the core engine fallback
-from utils.preprocessing import preprocess_image
+from utils.preprocessing import preprocess_image_classifier
 
 # 1. Path configurations
 MODEL_PATH = "model/final_model.tflite"
@@ -29,7 +29,7 @@ def test_prediction():
     # 3. Load and preprocess target leaf image
     print(f"Processing target image: {IMAGE_PATH}")
     img = Image.open(IMAGE_PATH).convert("RGB")
-    processed_img = preprocess_image(img, target_size=(224, 224))
+    processed_img = preprocess_image_classifier(img, target_size=(224, 224))
     
     # Ensure correct float32 precision data type matching
     input_data = np.array(processed_img, dtype=np.float32)

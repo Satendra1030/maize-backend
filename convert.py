@@ -3,6 +3,13 @@ import shutil
 import tensorflow as tf
 import keras
 
+# Force float32 everywhere BEFORE loading the model. Otherwise a
+# baked-in mixed_float16 training policy forces Conv2D/DepthwiseConv2D/
+# Relu6 into fp16, and the native TFLite converter can't lower those,
+# demanding Flex ops instead -- which app.py's lightweight
+# tflite_runtime/ai_edge_litert interpreter cannot execute on Render.
+keras.mixed_precision.set_global_policy("float32")
+
 KERAS_MODEL_PATH = "model/gatekeeper_final.keras"
 SAVED_MODEL_DIR = "model/temp_saved_model"
 TFLITE_OUTPUT_PATH = "model/gatekeeper_model.tflite"
@@ -70,19 +77,22 @@ converter.optimizations = [
     tf.lite.Optimize.DEFAULT
 ]
 
-# Allow TensorFlow Select operators when required.
+# IMPORTANT: do NOT enable SELECT_TF_OPS / Flex here.
 #
-# This is important because the conversion log shows:
-# AddV2
-# Conv2D
-# DepthwiseConv2dNative
-# Pad
-# Relu6
+# app.py deliberately loads models with the lightweight
+# tflite_runtime (or ai_edge_litert) interpreter to keep RAM
+# usage under Render's free-tier 512MB limit. That runtime
+# does not include the Flex delegate, so a Flex-dependent
+# .tflite file converts fine locally but crashes in
+# production at interpreter.allocate_tensors().
 #
-# are currently being rejected by the native TFLite converter.
+# The AddV2/Conv2D/DepthwiseConv2dNative/Pad/Relu6 ops that
+# previously required Flex only did so because the model was
+# running in fp16 (see the mixed_precision policy override
+# above). With float32 forced, these are all natively
+# supported TFLite builtins.
 converter.target_spec.supported_ops = [
-    tf.lite.OpsSet.TFLITE_BUILTINS,
-    tf.lite.OpsSet.SELECT_TF_OPS
+    tf.lite.OpsSet.TFLITE_BUILTINS
 ]
 
 # Keep float32 input/output

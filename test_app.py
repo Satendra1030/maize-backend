@@ -3,45 +3,43 @@ from PIL import Image
 import tensorflow as tf
 from utils.preprocessing import preprocess_image
 
-# 1. Using relative forward-slash paths to block Windows string corruption
-MODEL_PATH = "G:\maize-backend\model\final_model.keras"
-IMAGE_PATH = "test_leaf3.jpg"
+# NOTE: point this at the compiled .tflite file, not the .keras archive --
+# tf.lite.Interpreter cannot load a .keras SavedModel/archive directly.
+MODEL_PATH = "model/final_model.tflite"
+IMAGE_PATH = "test_leaf.jpg"
 
-# Correct Keras alphabetical sorting mapping
-CLASS_NAMES = ["Common Rust", "Gray Leaf Spot", "Healthy", "Northern Leaf Blight"]
+# Confirmed correct order -- matches app.py's CLASS_NAMES exactly.
+CLASS_NAMES = ["Blight", "Common Rust", "Gray_Leaf_Spot", "Healthy"]
+
 
 def test_prediction():
     print(f"Loading local TFLite model from: {MODEL_PATH}")
-    
-    # 2. Load TFLite Model using core tensorflow engine
+
     interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
-    
+
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
-    
-    # 3. Load and preprocess target leaf image
+
     print(f"Processing target image: {IMAGE_PATH}")
     img = Image.open(IMAGE_PATH).convert("RGB")
     processed_img = preprocess_image(img, target_size=(224, 224))
-    
-    # Ensure correct float32 precision data type matching
+
     input_data = np.array(processed_img, dtype=np.float32)
-    
-    # 4. Fire Inference Loop
+
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
-    
-    # 5. Extract and Decode outputs
+
     predictions = interpreter.get_tensor(output_details[0]['index'])[0]
     predicted_index = np.argmax(predictions)
-    
+
     print("\n--- LOCAL PREDICTION RESULTS ---")
     for i, class_name in enumerate(CLASS_NAMES):
         print(f"{class_name}: {predictions[i]*100:.2f}%")
-        
+
     print("--------------------------------")
     print(f"FINAL DECISION: {CLASS_NAMES[predicted_index]} ({predictions[predicted_index]*100:.2f}%)")
+
 
 if __name__ == "__main__":
     test_prediction()

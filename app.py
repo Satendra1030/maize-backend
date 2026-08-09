@@ -34,6 +34,18 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_THRESHOLD = 0.85  # 85% minimum threshold for valid predictions
 
 # ==========================================================================
+# TEMPORARY TESTING BYPASS -- REMOVE BEFORE PRODUCTION DEPLOYMENT
+# ==========================================================================
+# The gatekeeper model was confirmed (via direct testing) to not yet
+# reliably distinguish maize leaves from non-maize objects -- it needs
+# retraining. Setting SKIP_GATEKEEPER=true in the environment lets you
+# test Stage 2 (disease classification) and Stage 3 (confidence
+# threshold) end-to-end without being blocked by Stage 1. This must be
+# unset (or set to anything other than "true") before deploying for
+# real use -- leaving it on means NO image validation happens at all.
+SKIP_GATEKEEPER = os.getenv("SKIP_GATEKEEPER", "false").lower() == "true"
+
+# ==========================================================================
 # GROQ API CONFIGURATION
 # ==========================================================================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -77,7 +89,7 @@ else:
 
 from utils.pattern_analysis import analyze_leaf_patterns, consistency_check
 from utils.recommendations import get_recommendation
-from utils.preprocessing import preprocess_image, ALLOWED_EXTENSIONS
+from utils.preprocessing import preprocess_image, preprocess_image_classifier, ALLOWED_EXTENSIONS
 
 # --------------------------------------------------------------------------
 # SYMPTOMS AND DISEASE DATABASE
@@ -190,7 +202,19 @@ except Exception as e:
 # Helper Functions
 # --------------------------------------------------------------------------
 def verify_is_maize(img: Image.Image) -> bool:
-    """Passes preprocessed image array into the gatekeeper model runtime."""
+    """
+    Passes preprocessed image array into the gatekeeper model runtime.
+
+    The gatekeeper is a BINARY SIGMOID model with a single output unit
+    (Dense(1, activation='sigmoid')), trained with class mapping:
+        Index 0 = Foreign_Object
+        Index 1 = Maize_Leaf
+    A sigmoid output near 1.0 means Maize_Leaf; near 0.0 means
+    Foreign_Object. gate_predictions therefore has exactly ONE element
+    (e.g. [0.92]), not two -- indexing gate_predictions[1] here previously
+    threw an IndexError on every call, which the except block silently
+    swallowed and turned into a blanket "reject everything" result.
+    """
     try:
         processed = preprocess_image(img, target_size=IMG_SIZE)
         input_data = np.array(processed, dtype=np.float32)
@@ -199,11 +223,14 @@ def verify_is_maize(img: Image.Image) -> bool:
         gate_interpreter.invoke()
 
         gate_predictions = gate_interpreter.get_tensor(gate_output_details[0]['index'])[0]
-        
-        logger.info("GATEKEEPER ANALYSIS -> Maize: %.4f, Not-Maize: %.4f", 
-                    gate_predictions[0], gate_predictions[1])
+        maize_probability = float(gate_predictions[0])
 
-        return bool(gate_predictions[0] > gate_predictions[1])
+        logger.info(
+            "GATEKEEPER ANALYSIS -> Maize_Leaf probability: %.4f (Foreign_Object: %.4f)",
+            maize_probability, 1.0 - maize_probability
+        )
+
+        return maize_probability > 0.5
     except Exception as err:
         logger.error("Exception inside Gatekeeper pipeline layer: %s", str(err))
         return False
@@ -259,7 +286,7 @@ def predict():
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
         # STAGE 1 PIPELINE: GATEKEEPER VALIDATION CHECK
-        if not verify_is_maize(img):
+        if not SKIP_GATEKEEPER and not verify_is_maize(img):
             logger.warning("Rejected upload payload: Target image classified as NON-MAIZE.")
             return jsonify({
                 "success": False,
@@ -268,7 +295,11 @@ def predict():
             }), 400
 
         # STAGE 2 PIPELINE: MAIZE DISEASE CLASSIFICATION
-        processed = preprocess_image(img, target_size=IMG_SIZE)
+        # Uses preprocess_image_classifier (mobilenet_v2 [-1,1] scaling)
+        # NOT preprocess_image (raw [0,255], used by the gatekeeper only).
+        # This model has no preprocessing layer baked into its graph --
+        # confirmed empirically via diagnose_preprocessing.py.
+        processed = preprocess_image_classifier(img, target_size=IMG_SIZE)
         input_data = np.array(processed, dtype=np.float32)
 
         interpreter.set_tensor(input_details[0]['index'], input_data)
