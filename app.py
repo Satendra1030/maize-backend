@@ -95,7 +95,7 @@ from utils.preprocessing import preprocess_image, preprocess_image_classifier, A
 # SYMPTOMS AND DISEASE DATABASE
 # --------------------------------------------------------------------------
 SYMPTOMS_DATABASE = {
-    "Blight": {
+    "Northern Leaf Blight": {
         "symptoms": [
             "Long, elliptical, cigar-shaped tan or grayish lesions on leaves.",
             "Lesions merge to cause large areas of dead tissue.",
@@ -115,7 +115,7 @@ SYMPTOMS_DATABASE = {
         "treatment": "Apply copper-based or triazole fungicides early when pustules appear.",
         "prevention": "Plant resistant hybrids and avoid late-season sowing."
     },
-    "Gray_Leaf_Spot": {
+    "Gray Leaf Spot": {
         "symptoms": [
             "Narrow, rectangular tan-to-gray lesions parallel to leaf veins.",
             "Lesions turn opaque and fuse, blighting whole leaves.",
@@ -145,7 +145,7 @@ GATEKEEPER_PATH = os.getenv("GATEKEEPER_PATH", "model/gatekeeper_model.tflite")
 IMG_SIZE = (224, 224) 
 
 ALL_PROJECT_CLASSES = [
-    "Blight",
+    "Northern Leaf Blight",
     "Common Rust",
     "Gray Leaf Spot",
     "Healthy"
@@ -188,7 +188,7 @@ try:
     
     if num_model_outputs == 4:
         logger.info("Configuring layout map for 4-class development dataset.")
-        CLASS_NAMES = ["Blight", "Common Rust", "Gray_Leaf_Spot", "Healthy"]
+        CLASS_NAMES = ["Northern Leaf Blight", "Common Rust", "Gray Leaf Spot", "Healthy"]
     else:
         logger.info("Configuring workspace for full dataset deployment.")
         CLASS_NAMES = ALL_PROJECT_CLASSES
