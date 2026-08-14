@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ==========================================================================
 # CONFIDENCE THRESHOLD CONFIGURATION
 # ==========================================================================
-CONFIDENCE_THRESHOLD = 0.85 # 90% minimum threshold for valid predictions
+CONFIDENCE_THRESHOLD = 0.80 # 90% minimum threshold for valid predictions
 
 # ==========================================================================
 # TEMPORARY TESTING BYPASS -- REMOVE BEFORE PRODUCTION DEPLOYMENT
